@@ -1,12 +1,16 @@
 package handlers
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/smtp"
+	"sync"
 
 	g "github.com/serpapi/google-search-results-golang"
+
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
@@ -25,6 +29,13 @@ type SearchRequest struct {
 	City   string `json:"city"`
 	Query  string `json:"query"`
 	Device string `json:"device"`
+}
+
+type TenCitiesSearchRequest struct {
+	Cities []string `json:"cities"`
+	Query  string   `json:"query"`
+	Device string   `json:"device"`
+	Email  string   `json:"email"`
 }
 
 type SearchResult struct {
@@ -117,6 +128,116 @@ func SearchHandler(client *mongo.Client) http.HandlerFunc {
 	}
 }
 
+func TenCitiesSearchHandler(client *mongo.Client) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+
+		var req TenCitiesSearchRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, "Invalid request payload", http.StatusBadRequest)
+			return
+		}
+
+		if len(req.Cities) != 10 {
+			http.Error(w, "Exactly 10 cities must be provided", http.StatusBadRequest)
+			return
+		}
+
+		apiKey := config.LoadConfig().SerpAPIKey
+		mongoCollection := client.Database(config.LoadConfig().DbName).Collection("searches")
+
+		var allResults []SearchResult
+		var emailBody bytes.Buffer
+		var mu sync.Mutex
+		var wg sync.WaitGroup
+
+		for _, city := range req.Cities {
+			wg.Add(1)
+			go func(city string) {
+				defer wg.Done()
+
+				parameter := map[string]string{
+					"engine":        "google",
+					"location":      city,
+					"q":             req.Query,
+					"google_domain": "google.com.br",
+					"gl":            "br",
+					"hl":            "pt-br",
+					"device":        req.Device,
+				}
+
+				search := g.NewGoogleSearch(parameter, apiKey)
+				results, err := search.GetJSON()
+				if err != nil {
+					http.Error(w, "Failed to get search results", http.StatusInternalServerError)
+					return
+				}
+
+				adsOrOrganic, ok := results["ads"]
+				if !ok {
+					adsOrOrganic, ok = results["organic_results"]
+					if !ok {
+						http.Error(w, "'ads' or 'organic_results' field not found in search results", http.StatusNotFound)
+						return
+					}
+				}
+
+				adsOrOrganicJSON, err := json.Marshal(adsOrOrganic)
+				if err != nil {
+					http.Error(w, "Failed to convert 'ads' or 'organic_results' to JSON", http.StatusInternalServerError)
+					return
+				}
+
+				siteData, err := GoogleApiSearch(client, adsOrOrganicJSON, req.Query)
+				if err != nil {
+					http.Error(w, "Failed to get google api response", http.StatusInternalServerError)
+					return
+				}
+
+				mu.Lock()
+				var searchResults []SearchResult
+				if err := json.Unmarshal(siteData, &searchResults); err != nil {
+					http.Error(w, "Failed to unmarshal search results", http.StatusInternalServerError)
+					return
+				}
+
+				for _, result := range searchResults {
+					_, err := mongoCollection.InsertOne(context.TODO(), result)
+					if err != nil {
+						fmt.Printf("Failed to insert search result into MongoDB: %s\n", err.Error())
+					}
+
+					emailBody.WriteString(fmt.Sprintf("Cidade: %s\nTítulo: %s\nDesrição: %s\nLink: %s\n\n", city, result.Title, result.Snippet, result.Link))
+				}
+
+				allResults = append(allResults, searchResults...)
+				mu.Unlock()
+			}(city)
+		}
+
+		wg.Wait()
+
+		go func() {
+			if err := SendEmail(req.Email, emailBody.String()); err != nil {
+				fmt.Printf("Failed to send email: %v\n", err)
+			}
+		}()
+
+		// Return the combined results as a JSON response
+		resultsJSON, err := json.Marshal(allResults)
+		if err != nil {
+			http.Error(w, "Failed to marshal combined search results", http.StatusInternalServerError)
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		w.Write(resultsJSON)
+	}
+}
+
 func GoogleApiSearch(mongoClient *mongo.Client, adsOrOrganicJSON []byte, query string) ([]byte, error) {
 	apiKey := config.LoadConfig().CustomSearchAPIKey
 	cx := config.LoadConfig().SearchEngineID
@@ -171,4 +292,26 @@ func GoogleApiSearch(mongoClient *mongo.Client, adsOrOrganicJSON []byte, query s
 	}
 
 	return resultsJSON, nil
+}
+
+func SendEmail(to, body string) error {
+	from := config.LoadConfig().MailFrom
+	password := config.LoadConfig().MailPassword
+
+	// Set up authentication information.
+	auth := smtp.PlainAuth("", from, password, "smtp.gmail.com")
+
+	// Create the email message.
+	msg := "From: " + from + "\n" +
+		"To: " + to + "\n" +
+		"Subject: Monitoramente Brand | Resultados\n\n" +
+		body
+
+	// Send the email.
+	err := smtp.SendMail("smtp.gmail.com:587", auth, from, []string{to}, []byte(msg))
+	if err != nil {
+		return fmt.Errorf("failed to send email: %w", err)
+	}
+
+	return nil
 }

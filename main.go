@@ -34,6 +34,7 @@ func main() {
 
     mux.HandleFunc("/cities", handlers.GetCities())
     mux.HandleFunc("/search", handlers.SearchHandler(client))
+	mux.HandleFunc("/search/ten-cities", handlers.TenCitiesSearchHandler(client))
 
     corsHandler := middleware.CORS(mux)
 

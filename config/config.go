@@ -13,6 +13,8 @@ type Config struct {
 	CustomSearchAPIKey string
 	SearchEngineID     string
 	DbName             string
+	MailFrom           string
+	MailPassword       string
 }
 
 func LoadConfig() *Config {
@@ -27,6 +29,8 @@ func LoadConfig() *Config {
 		CustomSearchAPIKey: os.Getenv("CUSTOM_SEARCH_API_KEY"),
 		SearchEngineID:     os.Getenv("SEARCH_ENGINE_ID"),
 		DbName:             os.Getenv("MONGODB_NAME"),
+		MailFrom:           os.Getenv("MAIL_FROM"),
+		MailPassword:       os.Getenv("MAIL_PASSWORD"),
 	}
 
 	return config
