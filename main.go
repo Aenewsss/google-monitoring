@@ -11,6 +11,7 @@ import (
 	"go.mongodb.org/mongo-driver/mongo/readpref"
 
 	"google-monitoring/config"
+	"google-monitoring/middleware"
 
 	"google-monitoring/handlers"
 )
@@ -29,10 +30,12 @@ func main() {
 	}
 	fmt.Println("Connected to MongoDB!")
 
-	http.HandleFunc("/cities", handlers.GetCities())
-	http.HandleFunc("/search", handlers.SearchHandler())
+    mux := http.NewServeMux()
 
-	http.ListenAndServe(":8080", nil)
+    mux.HandleFunc("/cities", handlers.GetCities())
+    mux.HandleFunc("/search", handlers.SearchHandler())
 
-	log.Fatal(http.ListenAndServe(":8080", nil))
+    corsHandler := middleware.CORS(mux)
+
+    log.Fatal(http.ListenAndServe(":8080", corsHandler))
 }
