@@ -8,8 +8,10 @@ import (
 )
 
 type Config struct {
-	MongoURI   string
-	SerpAPIKey string
+	MongoURI           string
+	SerpAPIKey         string
+	CustomSearchAPIKey string
+	SearchEngineID     string
 }
 
 func LoadConfig() *Config {
@@ -19,8 +21,10 @@ func LoadConfig() *Config {
 	}
 
 	config := &Config{
-		MongoURI:   os.Getenv("MONGODB_URI"),
-		SerpAPIKey: os.Getenv("SERP_API_KEY"),
+		MongoURI:           os.Getenv("MONGODB_URI"),
+		SerpAPIKey:         os.Getenv("SERP_API_KEY"),
+		CustomSearchAPIKey: os.Getenv("CUSTOM_SEARCH_API_KEY"),
+		SearchEngineID:     os.Getenv("SEARCH_ENGINE_ID"),
 	}
 
 	return config
