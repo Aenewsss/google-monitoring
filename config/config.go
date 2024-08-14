@@ -12,6 +12,7 @@ type Config struct {
 	SerpAPIKey         string
 	CustomSearchAPIKey string
 	SearchEngineID     string
+	DbName             string
 }
 
 func LoadConfig() *Config {
@@ -25,6 +26,7 @@ func LoadConfig() *Config {
 		SerpAPIKey:         os.Getenv("SERP_API_KEY"),
 		CustomSearchAPIKey: os.Getenv("CUSTOM_SEARCH_API_KEY"),
 		SearchEngineID:     os.Getenv("SEARCH_ENGINE_ID"),
+		DbName:             os.Getenv("MONGODB_NAME"),
 	}
 
 	return config

@@ -1,11 +1,13 @@
 package handlers
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
 
 	g "github.com/serpapi/google-search-results-golang"
+	"go.mongodb.org/mongo-driver/mongo"
 
 	config "google-monitoring/config"
 
@@ -29,7 +31,7 @@ type SearchResult struct {
 	Link    string `json:"link"`
 }
 
-func SearchHandler() http.HandlerFunc {
+func SearchHandler(client *mongo.Client) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var req SearchRequest
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -76,7 +78,7 @@ func SearchHandler() http.HandlerFunc {
 			return
 		}
 
-		response, err := GoogleApiSearch(adsOrOrganicJSON, req.Query)
+		response, err := GoogleApiSearch(client, adsOrOrganicJSON, req.Query)
 		if err != nil {
 			http.Error(w, "Failed to get google api response", http.StatusInternalServerError)
 			return
@@ -87,7 +89,7 @@ func SearchHandler() http.HandlerFunc {
 	}
 }
 
-func GoogleApiSearch(adsOrOrganicJSON []byte, query string) ([]byte, error) {
+func GoogleApiSearch(mongoClient *mongo.Client,adsOrOrganicJSON []byte, query string) ([]byte, error) {
 	apiKey := config.LoadConfig().CustomSearchAPIKey
 	cx := config.LoadConfig().SearchEngineID
 
@@ -106,11 +108,13 @@ func GoogleApiSearch(adsOrOrganicJSON []byte, query string) ([]byte, error) {
 
 	var searchResults []SearchResult
 
+	mongoCollection := mongoClient.Database(config.LoadConfig().DbName).Collection("searches")
+
 	for i, result := range linkResults {
 		linkSite := result.Link
 		fmt.Printf("\n#%d: %s\n", i+1, linkSite)
 
-		resp, err := svc.Cse.List().Cx(cx).Q(query).LinkSite(linkSite).Do()
+		resp, err := svc.Cse.List().Cx(cx).Q(query).SiteSearch(linkSite).Do()
 		if err != nil {
 			fmt.Printf(err.Error())
 		}
@@ -125,6 +129,11 @@ func GoogleApiSearch(adsOrOrganicJSON []byte, query string) ([]byte, error) {
 			}
 
 			searchResults = append(searchResults, searchResult)
+
+			_, err := mongoCollection.InsertOne(context.TODO(), searchResult)
+			if err != nil {
+				fmt.Printf("Failed to insert search result into MongoDB: %s\n", err.Error())
+			}
 		}
 	}
 

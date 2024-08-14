@@ -33,7 +33,7 @@ func main() {
     mux := http.NewServeMux()
 
     mux.HandleFunc("/cities", handlers.GetCities())
-    mux.HandleFunc("/search", handlers.SearchHandler())
+    mux.HandleFunc("/search", handlers.SearchHandler(client))
 
     corsHandler := middleware.CORS(mux)
 
